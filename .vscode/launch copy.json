@@ -1,0 +1,661 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        // ====================
+        //||UNIMODAL TRAINING||
+        // ====================
+
+        // BioBERT
+        {
+            "name": "Train BioBERT for Clinical Notes",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TRAINER PARAMETERS
+                "--log_every_n_steps", "250",
+                "--save_dir", "",
+                "--gpus", "1",
+                "--max_epochs", "4",
+                "--min_epochs", "3",
+                "--precision", "16",
+                "--early_stop_patience", "0",
+                "--exp_name", "biobert",
+                "--model_name", "clino",
+
+                // MODEL PARAMETERS
+                "--pretrained", "dmis-lab/biobert-v1.1",
+
+                // BASE MODULE PARAMETERS
+                "--optimizer", "adamw",
+                "--amsgrad",
+                "--learning_rate", "3e-5",
+                "--weight_decay", "1e-2",
+                "--scheduler", "plateau",
+                "--scheduler_patience", "0",
+                "--loss_fn", "focal",
+                "--gamma", "1",
+                "--pos_weight",
+                "--target_focus",
+                
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "all",
+                "--clino_features", 
+                    "input_ids", 
+                    "attention_mask", 
+                    "token_type_ids",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "32",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // CXR
+        {
+            "name": "Train CXR Classifier for images",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TRAINER PARAMETERS
+                "--log_every_n_steps", "250",
+                "--save_dir", "",
+                "--gpus", "1",
+                "--min_epochs", "5",
+                "--early_stop_patience", "3",
+                "--exp_name", "cxr",
+                "--model_name", "cxr",
+
+                // MODEL PARAMETERS
+                "--backbone", "efficientnet b0",
+                "--pretrained",
+                "--layer_1", "256",
+
+                // BASE MODULE PARAMETERS
+                "--optimizer", "adamw",
+                "--amsgrad",
+                "--learning_rate", "0.0002909",
+                "--weight_decay", "0.0000023",
+                "--scheduler", "plateau",
+                "--scheduler_patience", "1",
+                "--loss_fn", "focal",
+                "--gamma", "1",
+                "--pos_weight",
+                "--target_focus",
+                
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--local_root", "",
+                "--labels", "all",
+                "--image_gamma", "0.5584",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--multi_view", "False",
+                "--pin_memory",
+                "--batch_size", "32",
+                "--gpu_image_transform",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+
+        // FFN
+        {
+            "name": "Train FFN for Clinical Covariates",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TRAINER PARAMETERS
+                "--log_every_n_steps", "250",
+                "--save_dir", "",
+                "--gpus", "1",
+                "--min_epochs", "5",
+                "--early_stop_patience", "3",
+                "--exp_name", "ffn",
+                "--model_name", "clico",
+
+                // MODEL PARAMETERS
+                "--droprate", "0.0",
+                "--layer_1", "40",
+                "--num_features", "15",
+
+                // BASE MODULE PARAMETERS
+                "--optimizer", "adamw",
+                "--amsgrad",
+                "--learning_rate", "0.00115",
+                "--weight_decay", "0.000012",
+                "--scheduler", "plateau",
+                "--scheduler_patience", "1",
+                "--loss_fn", "focal",
+                "--gamma", "1",
+                "--pos_weight",
+                // "--target_focus",
+                
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "Pneumonia",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "64",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+
+        // ===================
+        //||UNIMODAL TESTING||
+        // ==================
+
+        // BioBERT
+        {
+            "name": "Test BioBERT for Clinical Notes",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TEST PARAMETERS
+                "--ckpt_path", "",
+                "--exp_name", "biobert",
+                "--df_file", "",
+                "--save_dir", "",
+                "--gpus", "1",
+                "--model_name", "clino",
+
+                // DATA MODULE PARAMETERS
+                "--labels", "all",
+                "--clino_features", "input_ids", "attention_mask", "token_type_ids",
+                "--batch_size", "32",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // CXR
+        {
+            "name": "Test CXR Classifier for images",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TEST PARAMETERS
+                "--ckpt_path", "",
+                "--save_dir", "",
+                "--exp_name", "cxr",
+                "--gpus", "1",
+                "--model_name", "cxr",
+                "--threshold_tuning", "f1",
+
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--local_root", "",
+                "--image_gamma", "0.5584",
+                "--multi_view", "False",
+                "--gpu_image_transform",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--clino_features", 
+                    "input_ids", 
+                    "attention_mask", 
+                    "token_type_ids",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "64",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // FFN
+        {
+            "name": "Test FFN for Clinical Covariates",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TEST PARAMETERS
+                "--ckpt_path", "",
+                "--save_dir", "",
+                "--exp_name", "ffn",
+                "--gpus", "1",
+                "--model_name", "clico",
+
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "Pneumonia",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "64",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // ====================
+        //||MULTIMODAL TRAINING||
+        // ====================
+        
+        // CXR2 (Multiview)
+        {
+            "name": "Train Multiview CXR Classifier",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TRAINER PARAMETERS
+                "--save_dir", "",
+                "--log_every_n_steps", "250",
+                "--gpus", "1",
+                "--precision", "16",
+                "--min_epochs", "15",
+                "--early_stop_patience", "3",
+                "--exp_name", "cxr2",
+                "--model_name", "cxr2",
+
+                // MODEL PARAMETERS
+                "--cxr_pretrained", "",
+                "--dropout", "0.2",
+                "--num_heads", "8",
+                "--dim_feedforward", "2048",
+                "--backbone", "efficientnet b0",
+                "--layer_1", "512",
+                "--pretrained",
+
+                // BASE MODULE PARAMETERS
+                "--optimizer", "adamw",
+                "--amsgrad",
+                "--learning_rate", "0.0001",
+                "--weight_decay", "0.000121",
+                "--scheduler", "plateau",
+                "--scheduler_patience", "1",
+                "--scheduler_factor", "0.5",
+                "--loss_fn", "focal",
+                "--gamma", "1",
+                "--pos_weight",
+                "--target_focus",
+                
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "all",
+                "--local_root", "",
+                "--image_gamma", "0.5584",
+                "--multi_view",
+                "--gpu_image_transform",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "32",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // RADIOPATHS
+        {
+            "name": "Train Radiopaths",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TRAINER PARAMETERS
+                "--save_dir", "",
+                "--log_every_n_steps", "250",
+                "--gpus", "1",
+                "--precision", "16",
+                "--min_epochs", "15",
+                "--early_stop_patience", "3",
+                "--exp_name", "radiopaths",
+                "--model_name", "radiopaths",
+
+                // MODEL PARAMETERS
+                "--cxr_pretrained", "",
+                "--clino_pretrained", "",
+                "--clico_pretrained", "",
+                "--cxr_type", "multi",
+                "--dim", "768",
+                "--dropout", "0.0",
+                "--num_heads", "8",
+                "--layer_1", "256",
+
+                // BASE MODULE PARAMETERS
+                "--optimizer", "adamw",
+                "--amsgrad",
+                "--learning_rate", "1e-4",
+                "--weight_decay", "1e-2",
+                "--scheduler", "plateau",
+                "--scheduler_factor", "0.5",
+                "--scheduler_patience", "1",
+                "--loss_fn", "focal",
+                "--gamma", "1.5",
+                "--pos_weight",
+                //"--target_focus",
+                
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "Pneumonia",
+                "--local_root", "",
+                "--image_gamma", "0.5584",
+                "--multi_view", "False",
+                "--gpu_image_transform",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--clino_features", 
+                    "input_ids", 
+                    "attention_mask", 
+                    "token_type_ids",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "32",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // EARLY 2 FUSION
+        {
+            "name": "Train Early Fusion 2",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TRAINER PARAMETERS
+                "--save_dir", "",
+                "--log_every_n_steps", "250",
+                "--gpus", "1",
+                "--precision", "16",
+                "--min_epochs", "5",
+                "--early_stop_patience", "3",
+                "--exp_name", "earlyfusion2",
+                "--model_name", "early2",
+
+                // MODEL PARAMETERS
+                "--cxr_pretrained", "",
+                "--clino_pretrained", "",
+                "--clico_pretrained", "",
+                "--cxr_type", "single",
+                "--layer_1", "1024",
+                "--layer_2", "512",
+                "--dropout", "0.1",
+
+                // BASE MODULE PARAMETERS
+                "--optimizer", "adamw",
+                "--amsgrad",
+                "--learning_rate", "1e-4",
+                "--weight_decay", "1e-2",
+                "--scheduler", "plateau",
+                "--scheduler_patience", "0",
+                "--loss_fn", "focal",
+                "--gamma", "1.5",
+                "--pos_weight",
+                
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "Pneumonia",
+                "--local_root", "",
+                "--image_gamma", "0.5584",
+                "--gpu_image_transform",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--clino_features", 
+                    "input_ids", 
+                    "attention_mask", 
+                    "token_type_ids",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "64",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // =====================
+        //||MULTIMODAL TESTING||
+        // ====================
+
+        // CXR2 (Multiview)
+        {
+            "name": "Test Multiview CXR (CXR2)",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TEST PARAMETERS
+                "--ckpt_path", "",
+                "--save_dir", "",
+                "--exp_name", "cxr2",
+                "--gpus", "1",
+                "--model_name", "cxr2",
+
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--local_root", "",
+                "--labels", "all",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--multi_view",
+                "--batch_size", "32",
+                "--gpu_image_transform",
+                "--image_gamma", "0.5584"
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // RADIOPATHS
+        {
+            "name": "Test Radiopaths",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TEST PARAMETERS
+                "--ckpt_path", "",
+                "--save_dir", "",
+                "--exp_name", "radiopaths",
+                "--gpus", "1",
+                "--model_name", "radiopaths",
+
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "Pneumonia",
+                "--local_root", "",
+                "--image_gamma", "0.5584",
+                "--multi_view",
+                "--gpu_image_transform",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--clino_features", 
+                    "input_ids", 
+                    "attention_mask", 
+                    "token_type_ids",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "64",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+
+        // EARLY FUSION 2
+        {
+            "name": "Test Early Fusion 2",
+            "type": "python",
+            "request": "launch",
+            "args": [
+                // TEST PARAMETERS
+                "--ckpt_path", "",
+                "--save_dir", "",
+                "--exp_name", "earlyfusion",
+                "--gpus", "1",
+                "--model_name", "early2",
+                "--threshold_tuning", "f1",
+
+                // DATA MODULE PARAMETERS
+                "--df_file", "",
+                "--labels", "Pneumonia",
+                "--local_root", "",
+                "--image_gamma", "0.5584",
+                "--multi_view",
+                "--gpu_image_transform",
+                "--clico_dropna", "True",
+                "--clico_features",
+                    "hematocrit",
+                    "hemoglobin",
+                    "mch",
+                    "mchc",
+                    "mcv",
+                    "platelet",
+                    "rbc",
+                    "rdw",
+                    "wbc",
+                    "spo2",
+                    "temperature",
+                    "heart_rate",
+                    "resp_rate",
+                "--demog_features",
+                    "anchor_age",
+                    "gender",
+                "--clino_features", 
+                    "input_ids", 
+                    "attention_mask", 
+                    "token_type_ids",
+                "--target", "Pneumonia",
+                "--bin_mapping", "zeros",
+                "--icd_refinement",
+                "--pin_memory",
+                "--batch_size", "64",
+            ],
+            "program": "../src/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+    ]
+}

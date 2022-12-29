@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../frames"
+		},
+		{
+			"path": "../../experiments"
+		}
+	],
+	"settings": {
+		"workbench.colorTheme": "Shades of Purple"
+	}
+}
