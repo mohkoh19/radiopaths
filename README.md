@@ -34,3 +34,19 @@ Otherwise you can run the files as normal python scripts. You can use
     ```
 
     to display all the possible args both from the Lightning trainer and from our modules. If a module has configurable arguements/hyperparameters, they will be listed in its `add_model_specific_args` method and in the parameters of it's constructor. You can use the DocStrings to understand the functionality of the specific parameters.
+    
+    
+## Acknowledgement
+In case you use code from our repository, we would be grateful if you cite us:
+```
+@INPROCEEDINGS{kohankhaki2022radiopaths,
+  author={Kohankhaki, Mohammad and Ayad, Ahmad and Barhoush, Mahdi and Leibe, Bastian and Schmeink, Anke},
+  booktitle={2022 IEEE International Conference on Big Data (Big Data)}, 
+  title={Radiopaths: Deep Multimodal Analysis on Chest Radiographs}, 
+  year={2022},
+  volume={},
+  number={},
+  pages={3613-3621},
+  doi={10.1109/BigData55660.2022.10020356}
+}
+```
