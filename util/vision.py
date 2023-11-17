@@ -30,7 +30,7 @@ def prepare_backbone(backbone, pretrained, layer_1, num_classes, dropout=0.0):
     backbone = backbone.split()
     if backbone[0] == "efficientnet":
         if backbone[1] == "b0":  ##because of a current hash error use this
-          #WeightsEnum.get_state_dict = get_state_dict
+         # WeightsEnum.get_state_dict = get_state_dict
           #model=efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
           #efficientnet_b0(weights="DEFAULT")
           model = models.efficientnet_b0(pretrained)

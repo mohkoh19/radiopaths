@@ -6,9 +6,7 @@ from __future__ import print_function
 import copy
 import logging
 import math
-
 from os.path import join as pjoin
-
 import torch
 import torch.nn as nn
 import numpy as np
@@ -16,9 +14,8 @@ from torch.nn import functional as F
 from torch.nn import BCEWithLogitsLoss,CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
-
 from torchmetrics.functional.classification import multilabel_auroc,multilabel_average_precision,multilabel_precision_recall_curve
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 import models.configs as configs
 from models.attention import Attention
 from models.embed import Embeddings 
@@ -93,34 +90,6 @@ class IRENE(pl.LightningModule):
         self.clino_backbone.classifier = nn.Identity()
         self.clino_backbone.freeze()
         self.loss = BinaryFocalLossWithLogits()
-        self.pneumonia=[]
-        self.atel=[]
-        self.cardi=[]
-        self.consol=[]
-        self.edema=[]
-        self.enlarged=[]
-        self.fracture=[]
-        self.lung_lesion=[]
-        self.lung_opac=[]
-        self.pleural_eff=[]
-        self.pleural_other=[]
-        self.pneumothorax=[]
-
-        self.pneumonia2=[]
-        self.atel2=[]
-        self.cardi2=[]
-        self.consol2=[]
-        self.edema2=[]
-        self.enlarged2=[]
-        self.fracture2=[]
-        self.lung_lesion2=[]
-        self.lung_opac2=[]
-        self.pleural_eff2=[]
-        self.pleural_other2=[]
-        self.pneumothorax2=[]
-
-
-
         self.transformer = Transformer(config, img_size, vis)
         self.head = Linear(config.hidden_size, num_classes)
 
@@ -221,7 +190,61 @@ class IRENE(pl.LightningModule):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,mode='min',patience=5)
         return {"optimizer":optimizer,"lr_scheduler":{"scheduler":scheduler,"monitor":"val_loss","frequency":1}}
 
+    def test_epoch_end(self, outputs):
+      diseases_columns = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Enlarged_Cardiomediastinum',
+                             'Fracture', 'Lung_Lesion', 'Lung_Opacity', 'No_Finding', 'Pleural_Effusion',
+                             'Pleural_Other', 'Pneumonia', 'Pneumothorax', 'Support_Devices']
+      for i, disease in enumerate(diseases_columns):
 
+        all_auroc_scores = [output['auroc_scores'][i] if output['auroc_scores'] else None for output in outputs]
+        all_auprc_scores = [output['auprc_scores'][i] if output['auprc_scores'] else None for output in outputs]
+
+        all_auroc_scores = [score for score in all_auroc_scores if score is not None]
+        all_auprc_scores = [score for score in all_auprc_scores if score is not None]
+        
+        auroc_mean = np.mean(all_auroc_scores)
+        auprc_mean = np.mean(all_auprc_scores)
+        print(f'{disease}: AUROC = {auroc_mean:.4f}, AUPRC = {auprc_mean:.4f}')
+
+
+    def test_step(self, batch, batch_idx):
+        # Your test step logic here
+      features,targets,index = batch
+      x=features['image']
+      text=self.clino_backbone(features)
+      lab=torch.unsqueeze(features['clico'],2)
+      sex=features['demog'][:,0]
+      sex=sex.view(-1,1,1)
+      age=features['demog'][:,1]
+      age=age.view(-1,1,1) 
+      scores=self.forward(x,text,lab,sex,age)
+      outputs=torch.sigmoid(scores)
+
+      outputs_np = outputs.detach().cpu().numpy()
+      targets_np = targets.detach().cpu().numpy()
+
+        # Diseases order
+      diseases_columns = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Enlarged_Cardiomediastinum',
+                             'Fracture', 'Lung_Lesion', 'Lung_Opacity', 'No_Finding', 'Pleural_Effusion',
+                             'Pleural_Other', 'Pneumonia', 'Pneumothorax', 'Support_Devices']
+
+      auroc_scores = []
+      auprc_scores = []
+
+        # Calculate AUROC and AUPRC for each disease
+      for i, disease in enumerate(diseases_columns):
+        try:
+          auroc = roc_auc_score(targets_np[:, i], outputs_np[:, i])    
+          auroc_scores.append(auroc)
+          precisions, recalls, _ = precision_recall_curve(targets_np[:, i], outputs_np[:, i])
+          auprc = auc(recalls, precisions)
+          auprc_scores.append(auprc)
+        except ValueError as e:
+          print(f"Skipping {disease} due to: {e}")
+          auroc_scores.append(None)
+          auprc_scores.append(None)
+      return {'auroc_scores': auroc_scores, 'auprc_scores': auprc_scores}
+    
     def load_from(self, weights):
         with torch.no_grad():
             if self.zero_head:

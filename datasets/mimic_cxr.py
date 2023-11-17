@@ -93,7 +93,7 @@ class MIMIC_CXR(Dataset):
             except:
               print("still nooo",os.path.join(self.local_root, image_path))
                     
-              image=None
+              image=[]
 
         return image
 

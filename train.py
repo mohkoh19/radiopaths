@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
     
 
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss",  save_top_k=4,  mode='min',  dirpath=ckpt_dir, filename=args.exp_name
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss",  save_top_k=3,  mode='min',  dirpath=ckpt_dir, filename=args.exp_name
         + "-epoch={epoch}-"
         + 'val_loss'.replace("/", "_")
         + "={"
@@ -66,13 +66,16 @@ if __name__ == "__main__":
         + "={"
         + 'val_loss'
         + ":.2f}",
-        auto_insert_metric_name=False,every_n_epochs=29)
+        auto_insert_metric_name=False,every_n_epochs=69)
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
+
+    
+    
 
     if args.traintest=="train":
 
       wandb_logger = WandbLogger(project="pathal",name=args.exp_name,log_model="all",save_dir=args.save_dir)
-      trainer = Trainer(logger=wandb_logger,max_epochs=30,callbacks=[checkpoint_callback,checkpoint_callback2,lr_monitor],accelerator='gpu')
+      trainer = Trainer(logger=wandb_logger,max_epochs=70,callbacks=[checkpoint_callback,checkpoint_callback2,lr_monitor],accelerator='gpu')
       wandb_logger.watch(model, log="all", log_graph=False)
       try:
           trainer.fit(model,trainn,vall,ckpt_path=None if args.ckpt_path is None else args.ckpt_path)

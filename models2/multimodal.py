@@ -21,7 +21,7 @@ from util._curriculum_clustering import CurriculumClustering
 import torch.optim as optim
 import numpy as np
 import pickle
-
+from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 class CustomCyclicLR(optim.lr_scheduler._LRScheduler):
     ##custom learning rate scheduler to change learning rate cyclicly for o2u Net
     def __init__(self, optimizer, r1, r2, c, num_cycles, last_epoch=-1):
@@ -438,7 +438,7 @@ class Radiopaths(pl.LightningModule):
         self.clico_proj = nn.Linear(self.num_clico_features, self.hparams.dim, bias=False)
         self.r1=0.0001  #minimum learning rate
         self.r2=0.01  #maximum learning rate
-        self.c=10   #number of epochs in each cyclical round
+        self.c=12   #number of epochs in each cyclical round
         self.num_cycles=3   #number of cyclical rounds
         self.pe = PositionalEncoding(self.hparams.dim, 3)
 
@@ -525,6 +525,7 @@ class Radiopaths(pl.LightningModule):
       
 
     def training_step(self,batch,idx):
+      
       features,y,index=batch
       scores=self.forward(features)
       loss_l =self.bceloss(scores,y)
@@ -541,8 +542,8 @@ class Radiopaths(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=1e-2,weight_decay=0.01)
-        scheduler = CustomCyclicLR(optimizer, self.r1, self.r2, self.c, self.num_cycles)
-        return {"optimizer":optimizer,"lr_scheduler":{"scheduler":scheduler,"frequency":1,"interval": "epoch"}}
+        self.scheduler = CustomCyclicLR(optimizer, self.r1, self.r2, self.c, self.num_cycles)
+        return {"optimizer":optimizer,"lr_scheduler":{"scheduler":self.scheduler,"frequency":1,"interval": "epoch"}}
 
     def validation_step(self, val_batch, batch_idx):
         features,y,index = val_batch     
@@ -605,12 +606,16 @@ class Radiopaths(pl.LightningModule):
             feature_index2 += 1
 
       self.features_concat=np.concatenate((self.extracted_features1,self.extracted_features2))
-      np.save('/home/onur/features.npy',self.features_concat) ##save features as npy file
+      np.save('/home/onur/features2pca.npy',self.features_concat) ##save features as npy file
       data = {'loss':self.moving_loss, 'entropy': self.moving_entropy}  ##save moving loss and entropy
-      file_name='/home/onur/lossentropy.pkl'
+      file_name='/home/onur/lossentropy2pca.pkl'
+      file_name2='/home/onur/dicomlistt2pca.pkl'
+      self.dicomlist=self.dicomlist1+self.dicomlist2
+      with open(file_name2, 'wb') as file:
+        pickle.dump(self.dicomlist, file)
       with open(file_name, 'wb') as file:
         pickle.dump(data, file)
-      self.dicomlist=self.dicomlist1+self.dicomlist2
+      
       self.cluster()
       self.identifysamples()
 
@@ -629,7 +634,7 @@ class Radiopaths(pl.LightningModule):
       k_means.fit(pca_result)
       Z_org = k_means.predict(pca_result)
       curriculumCluster = CurriculumClustering(verbose = True, dim_reduce = 400, calc_auxiliary =False)
-      self.cu_clusters = curriculumCluster.fit_predict(pca_result, Z_org) ##features classified easy medium and hard
+      self.cu_clusters = curriculumCluster.fit_predict(self.features_concat, Z_org) ##features classified easy medium and hard
       
     def identifysamples(self):
       ## self.cu_clusters, self.moving_loss and self.moving_entropy will be used to identify noisy,informative and confident samples
@@ -652,7 +657,8 @@ class Radiopaths(pl.LightningModule):
       # Select the bottom x_percentile percent of samples based on 'entropy' for confident samples
       confident_samples = [self.moving_entropy[i]['dicom_id'] for i in entropy_ranked[:int(y_percentile * len(self.moving_entropy))]]
       # Reverse the order to select the top y_percentile percent of samples for informative samples
-      informative_samples = [self.moving_entropy[i]['dicom_id'] for i in reversed(entropy_ranked[:int(y_percentile * len(self.moving_entropy))])]
+      entropy_ranked_descending = sorted(range(len(self.moving_entropy)), key=lambda k: self.moving_entropy[k]['entropy'], reverse=True)
+      informative_samples = [self.moving_entropy[i]['dicom_id'] for i in entropy_ranked_descending[:int(0.1 * len(self.moving_entropy))]]
       # Identify confident samples based on 'cu_clusters' and store their 'dicom_id'
       confident_dicom_ids = [dicom_id for dicom_id in confident_samples if self.cu_clusters[self.dicomlist.index(dicom_id)] in [0, 1]]
       # Store informative samples directly
@@ -661,14 +667,12 @@ class Radiopaths(pl.LightningModule):
       print(len(confident_dicom_ids))
       print(len(noisy_dicom_ids))
       data = {'informative': informative_dicom_ids, 'confident': confident_dicom_ids, 'noisy':noisy_dicom_ids}
-      file_name='/home/onur/infonoisyconfident.pkl'
+      file_name='/home/onur/infonoisyconfident2pca.pkl'
       with open(file_name, 'wb') as file:
         pickle.dump(data, file)
       
       
       
-
-           
     def normalize_and_accumulatentropy(self): ##loss and entropy can be done in a single function
       print("entered")
       entropy_tensors = [item['entropy'] for item in self.entropy]
@@ -688,6 +692,31 @@ class Radiopaths(pl.LightningModule):
         if not found:
         # If the 'dicom_id' is not found, create a new dictionary
           self.moving_entropy.append({'dicom_id': dicom_id, 'entropy': normalized_entropy})
+           
+    #def normalize_and_accumulatentropy(self): ##loss and entropy can be done in a single function
+     # entropy_tensors = [item['entropy'] for item in self.entropy]
+      #total_entropy = sum(entropy.item() for entropy in entropy_tensors)
+      #mean_entropy = total_entropy / len(entropy_tensors)
+      #self.entropy = [{'dicom_id': item['dicom_id'], 'entropy': item['entropy'] - mean_entropy} for item in self.entropy]
+      ###accumulate it to self.moving_entropy
+      #for item in self.entropy:
+        #dicom_id = item['dicom_id']
+       # normalized_entropy = item['entropy']
+        #if self.current_epoch==0:
+         # self.moving_entropy.append({'dicom_id': dicom_id, 'entropy': normalized_entropy})
+        #else:
+         # for moving_entropy_item in self.moving_entropy:
+          #  if moving_entropy_item['dicom_id'] == dicom_id:
+           #   moving_entropy_item['entropy'] += normalized_entropy   
+            #  break
+      #if self.current_epoch ==11 or self.current_epoch == 23 or self.current_epoch ==7:
+       # self.moving_entropy = sorted(self.moving_entropy, key=lambda x: x['entropy'])
+        #middle_index = len(self.moving_entropy) // 2
+        #num_samples_to_discard_moving = int(len(self.moving_entropy) * 0.25 / 2)
+        #start_index_moving = middle_index - num_samples_to_discard_moving
+        #end_index_moving = middle_index + num_samples_to_discard_moving + 1
+        #self.moving_entropy = self.moving_entropy[:start_index_moving] + self.moving_entropy[end_index_moving:]
+    
       
       
 
@@ -711,6 +740,12 @@ class Radiopaths(pl.LightningModule):
         # If the 'dicom_id' is not found, create a new dictionary
           self.moving_loss.append({'dicom_id': dicom_id, 'loss': normalized_loss})
       
+    def on_train_start(self):
+        print("yes")
+        for _ in range(37):
+            print("xd")
+            self.scheduler.step()
+
 
 
     def training_epoch_end(self, outputs):
@@ -719,6 +754,7 @@ class Radiopaths(pl.LightningModule):
       for output in outputs:
         scores=output["scores"]
         targets=output["targets"]
+        targets = (targets >= 0.5).float()
         acc_s=accuracy(scores,targets,task='multilabel',num_labels=14)
         f1_s=f1_score(scores,targets,task='multilabel',num_labels=14)
         f1.append(f1_s)
@@ -726,14 +762,70 @@ class Radiopaths(pl.LightningModule):
       final_acc=sum(acc)/len(acc)
       final_f1=sum(f1)/len(f1)
       #self.loss_epoch= self.loss_epoch - self.loss_epoch.mean()
+
+      ##normalize and accumulate loss into self.moving_loss
       self.normalize_and_accumulateloss()
-      current_epoch = self.trainer.current_epoch
-      if current_epoch in [0,1,8,9,11,12,18,19,21,22,28,29]:
-         self.inference()
-      
       ##do inference to find predicted entropy for unlabelled samples
-      
+      current_epoch = self.trainer.current_epoch
+      #if current_epoch in [45,47,48,56,57,59]:
+      self.inference()
+         
       self.log_dict({'accuracy':final_acc,"f1_score":final_f1})
+    
+    def test_epoch_end(self, outputs):
+      diseases_columns = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Enlarged_Cardiomediastinum',
+                             'Fracture', 'Lung_Lesion', 'Lung_Opacity', 'No_Finding', 'Pleural_Effusion',
+                             'Pleural_Other', 'Pneumonia', 'Pneumothorax', 'Support_Devices']
+      for i, disease in enumerate(diseases_columns):
+
+        all_auroc_scores = [output['auroc_scores'][i] if output['auroc_scores'] else None for output in outputs]
+        all_auprc_scores = [output['auprc_scores'][i] if output['auprc_scores'] else None for output in outputs]
+
+        all_auroc_scores = [score for score in all_auroc_scores if score is not None]
+        all_auprc_scores = [score for score in all_auprc_scores if score is not None]
+        
+        auroc_mean = np.mean(all_auroc_scores)
+        auprc_mean = np.mean(all_auprc_scores)
+        print(f'{disease}: AUROC = {auroc_mean:.4f}, AUPRC = {auprc_mean:.4f}')
+
+
+    def test_step(self, batch, batch_idx):
+        # Your test step logic here
+      features,targets,index = batch
+      x=features['image']
+      text=self.clino_backbone(features)
+      lab=torch.unsqueeze(features['clico'],2)
+      sex=features['demog'][:,0]
+      sex=sex.view(-1,1,1)
+      age=features['demog'][:,1]
+      age=age.view(-1,1,1) 
+      scores=self.forward(x,text,lab,sex,age)
+      outputs=torch.sigmoid(scores)
+
+      outputs_np = outputs.detach().cpu().numpy()
+      targets_np = targets.detach().cpu().numpy()
+
+        # Diseases order
+      diseases_columns = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Enlarged_Cardiomediastinum',
+                             'Fracture', 'Lung_Lesion', 'Lung_Opacity', 'No_Finding', 'Pleural_Effusion',
+                             'Pleural_Other', 'Pneumonia', 'Pneumothorax', 'Support_Devices']
+
+      auroc_scores = []
+      auprc_scores = []
+
+        # Calculate AUROC and AUPRC for each disease
+      for i, disease in enumerate(diseases_columns):
+        try:
+          auroc = roc_auc_score(targets_np[:, i], outputs_np[:, i]) 
+          auroc_scores.append(auroc)
+          precisions, recalls, _ = precision_recall_curve(targets_np[:, i], outputs_np[:, i])
+          auprc = auc(recalls, precisions)
+          auprc_scores.append(auprc)
+        except ValueError as e:
+          print(f"Skipping {disease} due to: {e}")
+          auroc_scores.append(None)
+          auprc_scores.append(None)
+      return {'auroc_scores': auroc_scores, 'auprc_scores': auprc_scores}
       
 
 
