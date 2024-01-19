@@ -394,6 +394,7 @@ class Radiopaths(pl.LightningModule):
         size_unlabelled,
         unlabelled_loader,
         labelled_loader,
+        noisy_loader,
         dim=512,
         num_heads=4,
         dropout=0.1,
@@ -410,34 +411,27 @@ class Radiopaths(pl.LightningModule):
         self.size_unlabelled=size_unlabelled
         self.unlabelled_loader=unlabelled_loader
         self.labelled_loader=labelled_loader
+        self.noisy_loader=noisy_loader
         self.num_classes=14
-        #self.moving_loss_dic=torch.zeros(self.size_dataset)
-        #self.moving_entropy_dic=torch.zeros(self.size_unlabelled)
         self.moving_loss=[]  ##used for accumulating loss(
         self.moving_entropy=[] ##used for accumulating entropy
         self.cxr_backbone.backbone_model.classifier=nn.Identity()
         self.num_img_features = self.cxr_backbone.num_features
         #self.cxr_backbone.freeze()
         self.cxr_proj = nn.Linear(self.num_img_features, self.hparams.dim, bias=False)
-
         # Load pretrained ClinoClassifier and "drop" last layer
         # TODO: retrain clino for new implementation with num_classes and target_idx...
-        #self.clino_backbone = ClinoClassifier.load_from_checkpoint(
-         #   self.hparams.clino_pretrained, num_classes=14, target_idx=0
-        #)
         self.clino_backbone.classifier = nn.Identity()
         self.num_clino_features = self.clino_backbone.backbone_model.pooler.dense.out_features
         self.clino_backbone.freeze()
         self.clino_proj = nn.Linear(self.num_clino_features, self.hparams.dim, bias=False)
-
         # Use pretrained Clico Classifier
-        #self.clico_backbone = ClicoClassifier.load_from_checkpoint(self.hparams.clico_pretrained)
         self.clico_backbone.classifier = nn.Identity()
         self.clico_backbone.freeze()
         self.num_clico_features = self.clico_backbone.num_features
         self.clico_proj = nn.Linear(self.num_clico_features, self.hparams.dim, bias=False)
-        self.r1=0.0001  #minimum learning rate
-        self.r2=0.01  #maximum learning rate
+        self.r1=0.000001  #minimum learning rate
+        self.r2=0.0001  #maximum learning rate
         self.c=12   #number of epochs in each cyclical round
         self.num_cycles=3   #number of cyclical rounds
         self.pe = PositionalEncoding(self.hparams.dim, 3)
@@ -532,16 +526,12 @@ class Radiopaths(pl.LightningModule):
       for ind,losses in enumerate(loss_l):  ##dicom_ids are returned in  __getitem__ method and with corresponding losses put in self.losslist
         id_loss={'dicom_id':features['dicom_id'][ind],'loss':losses.mean().cpu()}
         self.losslist.append(id_loss)
-     # for pi, cl in zip(index,loss_l):      
-       #  print(cl.shape)             #this is with using seed and keeping track of images with indices. 
-       # self.loss_epoch[pi] = cl.mean().cpu().item()     #but lets use dicom_ids's as identifier, not indices.
       loss=loss_l.mean()    
       self.log('train_loss', loss,on_step=True, on_epoch=True)
-      #self.log('train_loss', loss,on_epoch=True)
       return {"loss":loss,"scores":scores,"targets":y}
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-2,weight_decay=0.01)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4,weight_decay=0.01)
         self.scheduler = CustomCyclicLR(optimizer, self.r1, self.r2, self.c, self.num_cycles)
         return {"optimizer":optimizer,"lr_scheduler":{"scheduler":self.scheduler,"frequency":1,"interval": "epoch"}}
 
@@ -551,8 +541,7 @@ class Radiopaths(pl.LightningModule):
         loss =self.bceloss(scores,y).mean()
         self.log('val_loss', loss,on_step=True,on_epoch=True) 
 
-    def inference(self):
-      ##check
+    def inference(self): ##do inference to calculate entropy for each unlabelled sample
       self.entropy=[]
       for features,labels,index in self.unlabelled_loader:
         with torch.no_grad(): 
@@ -568,63 +557,48 @@ class Radiopaths(pl.LightningModule):
           for ind,entr in enumerate(label_entropies):
             id_entr={'dicom_id':features['dicom_id'][ind],'entropy':entr.cpu()}
             self.entropy.append(id_entr)
-          #for pi, cl in zip(index,label_entropies):
-           # self.entropy[pi]=cl.cpu()
       self.normalize_and_accumulatentropy()
-      #self.moving_entropy_dic=self.moving_entropy_dic+self.entropy
           
     def on_train_end(self):
-      ##on train end do CurriculumClustering to classify samples as easy,medium and hard
-      ##save labelled extracted features to self.extracted_features1 
-      self.extracted_features1=np.zeros((self.size_dataset,512)) 
-      self.dicomlist1=[] ##save corresponding dicom_ids for images
+      ##on train end do CurriculumClustering to classify samples as easy,medium and hard 
+      y_percentile=0.05
+      entropy_ranked = sorted(range(len(self.moving_entropy)), key=lambda k: self.moving_entropy[k]['entropy'])
+      confident_samples = [self.moving_entropy[i]['dicom_id'] for i in entropy_ranked[:int(y_percentile * len(self.moving_entropy))]]
       ##save unlabelled extracted features to self.extracted_features2
-      self.extracted_features2=np.zeros((self.size_unlabelled,512))
+      self.extracted_features2=np.zeros((len(confident_samples),512))
       self.dicomlist2=[] ##save corresponding dicom_ids for images
-      feature_index1 = 0
       feature_index2 = 0
-      with torch.no_grad():
-        for features,labels,index in self.labelled_loader:  ##feature extraction for labelled dataset
-          for key,value in features.items():
-            if key=='image':
-              features[key]=value.to('cuda')
-          outputs=self.cxr_proj(self.cxr_backbone(features))
-          for ind,output in enumerate(outputs):
-            self.extracted_features1[feature_index1] = output.cpu().detach().numpy()
-            self.dicomlist1.append(features['dicom_id'][ind])
-            feature_index1 += 1 
-
+      with torch.no_grad(): 
         for features,labels,index in self.unlabelled_loader: ##feature extraction for unlabelled dataset
           for key,value in features.items():
             if key=='image':
               features[key]=value.to('cuda')
-          outputs=self.cxr_proj(self.cxr_backbone(features))
-        
-          for ind,output in enumerate(outputs):
-            self.extracted_features2[feature_index2] = output.cpu().detach().numpy()
-            self.dicomlist2.append(features['dicom_id'][ind])
-            feature_index2 += 1
+          for i in range(len(features['image'])): 
+            dicom_id=features['dicom_id'][i]
+            if dicom_id in confident_samples: ##for lower memory usage only get extracted features of confident samples
+             outputs=self.cxr_proj(self.cxr_backbone(features))
+             self.extracted_features2[feature_index2]=outputs[i].cpu().detach().numpy()
+             self.dicomlist2.append(features['dicom_id'][i])
+             feature_index2 += 1
 
-      self.features_concat=np.concatenate((self.extracted_features1,self.extracted_features2))
-      np.save('/home/onur/features2pca.npy',self.features_concat) ##save features as npy file
+      np.save('/home/onur/features2specun.npy',self.extracted_features2) ##save features as npy file
       data = {'loss':self.moving_loss, 'entropy': self.moving_entropy}  ##save moving loss and entropy
-      file_name='/home/onur/lossentropy2pca.pkl'
-      file_name2='/home/onur/dicomlistt2pca.pkl'
-      self.dicomlist=self.dicomlist1+self.dicomlist2
-      with open(file_name2, 'wb') as file:
-        pickle.dump(self.dicomlist, file)
+      file_name='/home/onur/lossentropy3specun.pkl'
+      #file_name2='/home/onur/dicomlist2specun.pkl'
+      #self.dicomlist=self.dicomlist2
+      #with open(file_name2, 'wb') as file:
+       # pickle.dump(self.dicomlist, file)
       with open(file_name, 'wb') as file:
         pickle.dump(data, file)
-      
-      self.cluster()
-      self.identifysamples()
+      #self.cluster()
+      #self.identifysamples()  ##clustering and identifying samples is done in a seperate .ipynb file
 
     def cluster(self):
       n_components_list = range(100, 500, 100)
       result = []
       for n_components in n_components_list:
         pca = PCA(n_components=n_components)
-        pca_result = pca.fit_transform(self.features_concat)
+        pca_result = pca.fit_transform(self.extracted_features2)
         result.append(np.sum(pca.explained_variance_ratio_))
         print(f'Cumulative explained variation for {n_components} principal components: {np.sum(pca.explained_variance_ratio_)}.')
       #tsne = TSNE(n_components=3, verbose=1, perplexity=40, n_iter=300)
@@ -634,24 +608,24 @@ class Radiopaths(pl.LightningModule):
       k_means.fit(pca_result)
       Z_org = k_means.predict(pca_result)
       curriculumCluster = CurriculumClustering(verbose = True, dim_reduce = 400, calc_auxiliary =False)
-      self.cu_clusters = curriculumCluster.fit_predict(self.features_concat, Z_org) ##features classified easy medium and hard
+      self.cu_clusters = curriculumCluster.fit_predict(self.extracted_features2, Z_org) ##features classified easy medium and hard
       
     def identifysamples(self):
       ## self.cu_clusters, self.moving_loss and self.moving_entropy will be used to identify noisy,informative and confident samples
       x_percentile=0.05
       y_percentile=0.05
-      noisy_dicom_ids = []  # To store dicom_ids of noisy samples
+      #noisy_dicom_ids = []  # To store dicom_ids of noisy samples
       informative_dicom_ids = []  # To store dicom_ids of informative samples
       confident_dicom_ids = []  # To store dicom_ids of confident samples
       # Sort 'self.moving_loss' based on 'loss' values in descending order
-      loss_ranked = sorted(range(len(self.moving_loss)), key=lambda k: -self.moving_loss[k]['loss'])
+      #loss_ranked = sorted(range(len(self.moving_loss)), key=lambda k: -self.moving_loss[k]['loss'])
       # Select the top x_percentile percent of samples based on 'loss' for noisy samples
-      x_samples = [self.moving_loss[i]['dicom_id'] for i in loss_ranked[:int(x_percentile * len(self.moving_loss))]]
+      #x_samples = [self.moving_loss[i]['dicom_id'] for i in loss_ranked[:int(x_percentile * len(self.moving_loss))]]
       # Identify noisy samples based on 'cu_clusters' and store their 'dicom_id'
-      for dicom_id in x_samples:
-        index = self.dicomlist.index(dicom_id)
-        if self.cu_clusters[index] == 0:
-          noisy_dicom_ids.append(dicom_id)
+      #for dicom_id in x_samples:
+       # index = self.dicomlist.index(dicom_id)
+       # if self.cu_clusters[index] == 0:
+        #  noisy_dicom_ids.append(dicom_id)
       # Sort 'self.moving_entropy' based on 'entropy' values in ascending order
       entropy_ranked = sorted(range(len(self.moving_entropy)), key=lambda k: self.moving_entropy[k]['entropy'])
       # Select the bottom x_percentile percent of samples based on 'entropy' for confident samples
@@ -663,11 +637,8 @@ class Radiopaths(pl.LightningModule):
       confident_dicom_ids = [dicom_id for dicom_id in confident_samples if self.cu_clusters[self.dicomlist.index(dicom_id)] in [0, 1]]
       # Store informative samples directly
       informative_dicom_ids = informative_samples
-      print(len(informative_dicom_ids))
-      print(len(confident_dicom_ids))
-      print(len(noisy_dicom_ids))
-      data = {'informative': informative_dicom_ids, 'confident': confident_dicom_ids, 'noisy':noisy_dicom_ids}
-      file_name='/home/onur/infonoisyconfident2pca.pkl'
+      data = {'informative': informative_dicom_ids, 'confident': confident_dicom_ids}
+      file_name='/home/onur/infonoisyconfident2pcabinary.pkl'
       with open(file_name, 'wb') as file:
         pickle.dump(data, file)
       
@@ -693,32 +664,6 @@ class Radiopaths(pl.LightningModule):
         # If the 'dicom_id' is not found, create a new dictionary
           self.moving_entropy.append({'dicom_id': dicom_id, 'entropy': normalized_entropy})
            
-    #def normalize_and_accumulatentropy(self): ##loss and entropy can be done in a single function
-     # entropy_tensors = [item['entropy'] for item in self.entropy]
-      #total_entropy = sum(entropy.item() for entropy in entropy_tensors)
-      #mean_entropy = total_entropy / len(entropy_tensors)
-      #self.entropy = [{'dicom_id': item['dicom_id'], 'entropy': item['entropy'] - mean_entropy} for item in self.entropy]
-      ###accumulate it to self.moving_entropy
-      #for item in self.entropy:
-        #dicom_id = item['dicom_id']
-       # normalized_entropy = item['entropy']
-        #if self.current_epoch==0:
-         # self.moving_entropy.append({'dicom_id': dicom_id, 'entropy': normalized_entropy})
-        #else:
-         # for moving_entropy_item in self.moving_entropy:
-          #  if moving_entropy_item['dicom_id'] == dicom_id:
-           #   moving_entropy_item['entropy'] += normalized_entropy   
-            #  break
-      #if self.current_epoch ==11 or self.current_epoch == 23 or self.current_epoch ==7:
-       # self.moving_entropy = sorted(self.moving_entropy, key=lambda x: x['entropy'])
-        #middle_index = len(self.moving_entropy) // 2
-        #num_samples_to_discard_moving = int(len(self.moving_entropy) * 0.25 / 2)
-        #start_index_moving = middle_index - num_samples_to_discard_moving
-        #end_index_moving = middle_index + num_samples_to_discard_moving + 1
-        #self.moving_entropy = self.moving_entropy[:start_index_moving] + self.moving_entropy[end_index_moving:]
-    
-      
-      
 
     def normalize_and_accumulateloss(self):
       ##normalize loss
@@ -740,11 +685,9 @@ class Radiopaths(pl.LightningModule):
         # If the 'dicom_id' is not found, create a new dictionary
           self.moving_loss.append({'dicom_id': dicom_id, 'loss': normalized_loss})
       
-    def on_train_start(self):
-        print("yes")
-        for _ in range(37):
-            print("xd")
-            self.scheduler.step()
+    def on_train_start(self):  ##Make the scheduler start from desired learning rate for second, third iterations
+      for _ in range(37):
+        self.scheduler.step()
 
 
 
@@ -761,18 +704,17 @@ class Radiopaths(pl.LightningModule):
         acc.append(acc_s)
       final_acc=sum(acc)/len(acc)
       final_f1=sum(f1)/len(f1)
-      #self.loss_epoch= self.loss_epoch - self.loss_epoch.mean()
-
       ##normalize and accumulate loss into self.moving_loss
-      self.normalize_and_accumulateloss()
+      #self.normalize_and_accumulateloss()
       ##do inference to find predicted entropy for unlabelled samples
       current_epoch = self.trainer.current_epoch
-      #if current_epoch in [45,47,48,56,57,59]:
-      self.inference()
-         
+      if current_epoch in [71,80,82,83,92,93,95,104]:
+        self.inference()
       self.log_dict({'accuracy':final_acc,"f1_score":final_f1})
     
     def test_epoch_end(self, outputs):
+      meanauroc=[]
+      meanauprc=[]
       diseases_columns = ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Enlarged_Cardiomediastinum',
                              'Fracture', 'Lung_Lesion', 'Lung_Opacity', 'No_Finding', 'Pleural_Effusion',
                              'Pleural_Other', 'Pneumonia', 'Pneumothorax', 'Support_Devices']
@@ -785,23 +727,22 @@ class Radiopaths(pl.LightningModule):
         all_auprc_scores = [score for score in all_auprc_scores if score is not None]
         
         auroc_mean = np.mean(all_auroc_scores)
+        meanauroc.append(auroc_mean)
         auprc_mean = np.mean(all_auprc_scores)
+        meanauprc.append(auprc_mean)
         print(f'{disease}: AUROC = {auroc_mean:.4f}, AUPRC = {auprc_mean:.4f}')
+      print("Mean AUROC",np.mean(meanauroc))
+      print("Mean AUPRC",np.mean(meanauprc))
 
 
     def test_step(self, batch, batch_idx):
         # Your test step logic here
       features,targets,index = batch
-      x=features['image']
-      text=self.clino_backbone(features)
-      lab=torch.unsqueeze(features['clico'],2)
-      sex=features['demog'][:,0]
-      sex=sex.view(-1,1,1)
-      age=features['demog'][:,1]
-      age=age.view(-1,1,1) 
-      scores=self.forward(x,text,lab,sex,age)
-      outputs=torch.sigmoid(scores)
+      outputs = self.forward(features)
+      outputs=torch.sigmoid(outputs)
 
+        # Assuming outputs and targets are tensors of shape (batch_size, num_classes)
+        # Convert tensors to numpy arrays for sklearn metrics
       outputs_np = outputs.detach().cpu().numpy()
       targets_np = targets.detach().cpu().numpy()
 
@@ -816,15 +757,19 @@ class Radiopaths(pl.LightningModule):
         # Calculate AUROC and AUPRC for each disease
       for i, disease in enumerate(diseases_columns):
         try:
-          auroc = roc_auc_score(targets_np[:, i], outputs_np[:, i]) 
+          auroc = roc_auc_score(targets_np[:, i], outputs_np[:, i])
+          #print(f'{disease}: AUROC = {auroc:.4f}')
           auroc_scores.append(auroc)
           precisions, recalls, _ = precision_recall_curve(targets_np[:, i], outputs_np[:, i])
           auprc = auc(recalls, precisions)
+          #print(f'{disease}: AUPRC = {auprc:.4f}')
           auprc_scores.append(auprc)
         except ValueError as e:
           print(f"Skipping {disease} due to: {e}")
           auroc_scores.append(None)
           auprc_scores.append(None)
+        # If needed, you can store or aggregate the scores for later analysis
+
       return {'auroc_scores': auroc_scores, 'auprc_scores': auprc_scores}
       
 

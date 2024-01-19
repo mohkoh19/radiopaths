@@ -132,8 +132,10 @@ def handle_missing_labels(dataframe, labels, icd_refinement, bin_mapping, target
 
     # Apply Binary Mapping policy (if provided)
     if bin_mapping == "ones":
+        print("onesmapping")
         df[labels] = df[labels].replace(-1, 1)
     elif bin_mapping == "zeros":
+        print("zerosmapping")
         df[labels] = df[labels].replace(-1, 0)
 
     # Fill all nan values (missing observation) with 0

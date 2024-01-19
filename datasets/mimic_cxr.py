@@ -93,7 +93,7 @@ class MIMIC_CXR(Dataset):
             except:
               print("still nooo",os.path.join(self.local_root, image_path))
                     
-              image=[]
+              image=None
 
         return image
 
@@ -194,17 +194,15 @@ class MIMIC_CXR_Loader(LightningDataModule):
         self,
         df_file,
         df_file2,
+        df_file3,
         pred_entropy="no",
         labels="all",
         target="Pneumonia",
         local_root=None,
         random_state=19,
-        split_fracs=[0.7, 0.2],
-        #clico_features=[],
-       # clino_features=[],
+        split_fracs=[0.8, 0.1],
         clico_dropna=False,
-        clico_transform="robust",
-       # demog_features=[],
+        clico_transform="robust",   
         image_mean=[0.485, 0.456, 0.406],
         image_std=[0.229, 0.224, 0.225],
         image_gamma=0.4,
@@ -274,7 +272,7 @@ class MIMIC_CXR_Loader(LightningDataModule):
         filename = os.path.splitext(os.path.basename(df_file))
         self.ext = filename[1]
         self.dataframe = pd.read_csv(df_file) if self.ext == ".csv" else pd.read_pickle(df_file)
-        
+        self.dataframe3=pd.read_csv(df_file3) if self.ext == ".csv" else pd.read_pickle(df_file3)
 
         if self.hparams.pred_entropy=="yes":
           self.dataframe2 = pd.read_csv(df_file2) if self.ext == ".csv" else pd.read_pickle(df_file2)
@@ -286,14 +284,12 @@ class MIMIC_CXR_Loader(LightningDataModule):
         parser.add_argument("--df_file", type=str, required=True)
         parser.add_argument("--pred_entropy", type=str, required=True,default="no")
         parser.add_argument("--df_file2", type=str, default=None)
+        parser.add_argument("--df_file3", type=str, default=None)
         parser.add_argument("--local_root", type=str, default=None)
         parser.add_argument("--random_state", type=int, default=19)
         parser.add_argument("--split_fracs", nargs="+", default=[0.7, 0.2])
-        #parser.add_argument("--clico_features", nargs="+", default=[])
         parser.add_argument("--clico_dropna", type=semi_flag, nargs="?", const=True, default=False)
         parser.add_argument("--clico_transform", type=str, default="robust")
-        #parser.add_argument("--clino_features", nargs="+", default=[])
-       # parser.add_argument("--demog_features", nargs="+", default=[])
         parser.add_argument("--labels", nargs="+", default="all")
         parser.add_argument("--target", type=str, default="Pneumonia")
         parser.add_argument("--image_mean", nargs="+", type=float, default=[0.485, 0.456, 0.406])
@@ -347,7 +343,7 @@ class MIMIC_CXR_Loader(LightningDataModule):
 
       
 
-    def _get_dataloader(self, stage,flag):
+    def _get_dataloader(self, stage,flag1,flag2):
         """Helper function to create DataLoaders for each stage
 
         Args:
@@ -356,9 +352,17 @@ class MIMIC_CXR_Loader(LightningDataModule):
         Returns:
             DataLoader: Loads data with specified parameters.
         """
-        if self.hparams.pred_entropy=="yes" and flag!=1:
-          
-          
+        if flag2==1:
+          print("noisy")
+          return DataLoader(
+            self.datasets3[stage],
+            shuffle=False,
+            batch_size=self.hparams.batch_size,
+            num_workers=0,
+            pin_memory=self.hparams.pin_memory,)
+
+        if self.hparams.pred_entropy=="yes" and flag1!=1:
+          print("unlabelled")
           return DataLoader(
             self.datasets2[stage],
             shuffle=False,
@@ -371,11 +375,8 @@ class MIMIC_CXR_Loader(LightningDataModule):
             self.datasets[stage],
             shuffle=stage == "train",
             batch_size=self.hparams.batch_size,
-           # num_workers=self.hparams.num_workers,
             num_workers=0,
-            pin_memory=self.hparams.pin_memory,
-            #persistent_workers=self.hparams.persistent_workers,
-      
+            pin_memory=self.hparams.pin_memory,  
         )
 
     def prepare_data(self):
@@ -386,15 +387,21 @@ class MIMIC_CXR_Loader(LightningDataModule):
         print("prepare data")
         print(self.hparams.bin_mapping)
         if self.hparams.pred_entropy=="yes": 
-          
-          
+
           self.dataframe2 = preprocessing.handle_missing_labels(
             self.dataframe2,
             self.hparams.labels,
             self.hparams.icd_refinement,
             self.hparams.bin_mapping,)
+
+          self.dataframe3 = preprocessing.handle_missing_labels(
+            self.dataframe3,
+            self.hparams.labels,
+            self.hparams.icd_refinement,
+            self.hparams.bin_mapping,)
         
           self.dataframe2 = preprocessing.handle_view_positions(self.dataframe2)
+          self.dataframe3 = preprocessing.handle_view_positions(self.dataframe3)
           
           
     
@@ -402,34 +409,46 @@ class MIMIC_CXR_Loader(LightningDataModule):
           if self.hparams.multi_view:
             # Each row contains both images from the study
             self.dataframe2 = preprocessing.to_multi_view(self.dataframe2)
-          else:
+          else:   
+            # Reduce dataset to only frontal perspective 
+           self.dataframe2 = self.dataframe2[self.dataframe2.view_position == "FRONTAL"]
+          
+          if self.hparams.multi_view:
+            # Each row contains both images from the study
+            self.dataframe3 = preprocessing.to_multi_view(self.dataframe3)
+          else:   
+            # Reduce dataset to only frontal perspective 
+           self.dataframe3 = self.dataframe3[self.dataframe3.view_position == "FRONTAL"]
             
-            # Reduce dataset to only frontal perspective
-           
-            self.dataframe2 = self.dataframe2[self.dataframe2.view_position == "FRONTAL"]
-            
-         # print("path3",self.dataframe2.image_path[1])
+        
         
 
         # Process Demographic features
           if self.demog_features:
-            
             self.dataframe2 = preprocessing.process_demogs(self.dataframe2)
+
+          if self.demog_features:
+            self.dataframe3 = preprocessing.process_demogs(self.dataframe3)
           
 
         # Remove all examples with missing modalities
           if self.hparams.clico_dropna: ##doesnt enter
             self.dataframe2 = self.dataframe2.dropna(axis=0, subset=self.clico_features, how="all")
             self.dataframe2.reset_index(drop=True, inplace=True)
+
           self.split2 = preprocessing.split_without_overlap(
             self.dataframe2,
             self.hparams.random_state,
-            split_fracs=[0.95, 0.01],
+            split_fracs=[0.98, 0.01],
+        )
+          self.split3 = preprocessing.split_without_overlap(
+            self.dataframe3,
+            self.hparams.random_state,
+            split_fracs=[0.98, 0.01],
         )
 
-          if self.clico_features:
-            
-            self.split = preprocessing.process_clicos(
+          if self.clico_features:         
+            self.split2 = preprocessing.process_clicos(
                 self.split2,
                 self.clico_features,
                 self.hparams.random_state,
@@ -437,18 +456,28 @@ class MIMIC_CXR_Loader(LightningDataModule):
                 #missing_modalities=not self.hparams.clico_dropna,
                 missing_modalities=False,
             )
+          if self.clico_features:         
+            self.split3 = preprocessing.process_clicos(
+                self.split3,
+                self.clico_features,
+                self.hparams.random_state,
+                self.hparams.clico_transform,
+                #missing_modalities=not self.hparams.clico_dropna,
+                missing_modalities=False,
+            )
 ##########################################################################################
+        
         self.dataframe = preprocessing.handle_missing_labels(
             self.dataframe,
             self.hparams.labels,
             self.hparams.icd_refinement,
             self.hparams.bin_mapping,
         )
-
+        
         # Handle view positions in dataframe
         self.dataframe = preprocessing.handle_view_positions(self.dataframe)
         
-        
+       
         # Decide between single- or multi-view
         if self.hparams.multi_view:
             # Each row contains both images from the study
@@ -458,12 +487,12 @@ class MIMIC_CXR_Loader(LightningDataModule):
             
             self.dataframe = self.dataframe[self.dataframe.view_position == "FRONTAL"]
           
-      
+        
 
         # Process Demographic features
         if self.demog_features:
             self.dataframe = preprocessing.process_demogs(self.dataframe)
-
+       
         # Remove all examples with missing modalities
         if self.hparams.clico_dropna: ##doesnt enter
             self.dataframe = self.dataframe.dropna(axis=0, subset=self.clico_features, how="all")
@@ -473,10 +502,9 @@ class MIMIC_CXR_Loader(LightningDataModule):
         self.split = preprocessing.split_without_overlap(
             self.dataframe,
             self.hparams.random_state,
-            self.hparams.split_fracs,
+            split_fracs=[0.8, 0.1],
         )
-        
-        #print("pathself13",self.dataframe.image_path[1])
+       
         # Process Clico Features, if clico features are provided
         if self.clico_features:
             self.split = preprocessing.process_clicos(
@@ -487,7 +515,6 @@ class MIMIC_CXR_Loader(LightningDataModule):
                 #missing_modalities=not self.hparams.clico_dropna,
                 missing_modalities=False,
             )
-        #print("pathself13",self.dataframe.image_path[1])
         
         
     def return_dataset(self):
@@ -499,9 +526,20 @@ class MIMIC_CXR_Loader(LightningDataModule):
         """
         self.datasets = {}
         self.datasets2 = {}
+        self.datasets3={}
         print("stage")
-        ##fracs
         if self.hparams.pred_entropy=="yes":
+          for key in self.split3.keys():
+            self.datasets3[key]=MIMIC_CXR(
+                self.split3[key],
+                labels=self.hparams.labels,
+                clico_features=self.clico_features,
+                clino_features=self.clino_features,
+                demog_features=self.demog_features,
+                local_root=self.local_root,
+                multi_view=self.hparams.multi_view,
+            )    
+
           for key in self.split2.keys():
             self.datasets2[key]=MIMIC_CXR(
                 self.split2[key],

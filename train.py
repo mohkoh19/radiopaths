@@ -29,17 +29,20 @@ if __name__ == "__main__":
 
     ckpt_dir = os.path.join(args.save_dir, args.exp_name)
     os.makedirs(ckpt_dir, exist_ok=True)
-
+    
+    
     dm = MIMIC_CXR_Loader.from_argparse_args(args)
     dm.prepare_data()
     dm.setup()
-    trainn=dm._get_dataloader("train",1)
-    unlabelled_loader=dm._get_dataloader("train",0)
-    vall=dm._get_dataloader("val",1)
-    testt=dm._get_dataloader("test",1)
+    trainn=dm._get_dataloader("train",1,0)
+    noisy=dm._get_dataloader("train",1,1)
+    unlabelled_loader=dm._get_dataloader("train",0,0)
+    vall=dm._get_dataloader("val",1,0)
+    testt=dm._get_dataloader("test",1,0)
     unlabelled_dataset=dm.return_dataset()
     print("lengthtraindataset",len(trainn.dataset))
     print("lengthunlabelled",len(unlabelled_dataset))
+    print("lennoisy",len(noisy.dataset))
     
     
 
@@ -49,11 +52,11 @@ if __name__ == "__main__":
     elif args.model_name=="Clino":
       model = ClinoClassifier()
     elif args.model_name=="Radiopaths":
-      model=Radiopaths(len(trainn.dataset),len(unlabelled_dataset),unlabelled_loader,trainn)
+      model=Radiopaths(len(trainn.dataset),len(unlabelled_dataset),unlabelled_loader,trainn,noisy)
 
     
 
-    checkpoint_callback = ModelCheckpoint(monitor="val_loss",  save_top_k=3,  mode='min',  dirpath=ckpt_dir, filename=args.exp_name
+    checkpoint_callback = ModelCheckpoint(monitor="val_loss",  save_top_k=5,  mode='min',  dirpath=ckpt_dir, filename=args.exp_name
         + "-epoch={epoch}-"
         + 'val_loss'.replace("/", "_")
         + "={"
@@ -66,7 +69,7 @@ if __name__ == "__main__":
         + "={"
         + 'val_loss'
         + ":.2f}",
-        auto_insert_metric_name=False,every_n_epochs=69)
+        auto_insert_metric_name=False,every_n_epochs=105)
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     
@@ -75,7 +78,7 @@ if __name__ == "__main__":
     if args.traintest=="train":
 
       wandb_logger = WandbLogger(project="pathal",name=args.exp_name,log_model="all",save_dir=args.save_dir)
-      trainer = Trainer(logger=wandb_logger,max_epochs=70,callbacks=[checkpoint_callback,checkpoint_callback2,lr_monitor],accelerator='gpu')
+      trainer = Trainer(logger=wandb_logger,max_epochs=106,callbacks=[checkpoint_callback,checkpoint_callback2,lr_monitor],accelerator='gpu')
       wandb_logger.watch(model, log="all", log_graph=False)
       try:
           trainer.fit(model,trainn,vall,ckpt_path=None if args.ckpt_path is None else args.ckpt_path)
